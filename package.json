@@ -1,0 +1,19 @@
+{
+  "name": "gecko-01-datastream-agent",
+  "version": "1.0.0",
+  "description": "GECKO-01 — 24/7 CoinGecko DataStream Pipeline Agent",
+  "main": "src/agent.js",
+  "scripts": {
+    "start": "node src/agent.js",
+    "dev": "node --watch src/agent.js"
+  },
+  "dependencies": {
+    "express": "^4.18.2",
+    "ws": "^8.16.0",
+    "node-fetch": "^2.7.0",
+    "cors": "^2.8.5"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
