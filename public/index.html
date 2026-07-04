@@ -208,7 +208,7 @@ body{background:var(--bg);color:var(--white);font-family:'SF Mono','Fira Code','
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
 <script>
 const CHILD_AGENTS = [
-  {id:'ALPHA-01',name:'Alpha Signal Agent',desc:'Buy/sell signals from price ticks',color:'#8b5cf6',status:'standby',metrics:{signals:0,mode:'passive'}},
+  {id:'ALPHA-01',name:'Alpha Signal Agent',desc:'Buy/sell signals from price ticks',color:'#8b5cf6',status:'standby',metrics:{signals:0,ticks:0,alerts:0,mode:'passive'}},
   {id:'RISK-01', name:'Risk Monitor Agent', desc:'Portfolio risk & drawdown alerts',color:'#e05050',status:'standby',metrics:{alerts:0,score:'—'}},
   {id:'RWA-01',  name:'RWA Oracle Agent',   desc:'Tokenized asset NAV tracking',   color:'#1dc9a0',status:'standby',metrics:{tracked:3,nav:'—'}},
   {id:'REPORT-01',name:'Report Agent',      desc:'Daily digest & summaries',        color:'#e8a020',status:'standby',metrics:{reports:0,last:'—'}},
@@ -269,15 +269,22 @@ function handleEvent(ev){
       document.getElementById('bb-pull').textContent=pullCount;
       document.getElementById('bs-next').textContent='30s';
       pushEvent('SYS','t-sys',`Cycle #${d.pullNumber} — <b>${d.assetsCount}</b> assets updated &nbsp;alerts: ${d.alertsFired}`);
-      updateMetric('REPORT-01','last',ts());
-      updateMetric('REPORT-01','reports',pullCount);
       break;
     case 'gecko.api.request':
       document.getElementById('api-log').textContent=`api: GET /coins/markets → ${d.assets} assets · ${ts()}`;
       break;
     case 'gecko.agent.connect':
-      pushEvent('AGENT','t-agent',`Agent connected — total clients: <b>${d.totalClients}</b>`);
+      pushEvent('AGENT','t-agent',`<b>${d.agentId||'Agent'}</b> connected — total clients: <b>${d.totalClients}</b>`);
       document.getElementById('bb-clients').textContent=d.totalClients;
+      if(d.agentId) setAgentActive(d.agentId,true);
+      break;
+    case 'gecko.agent.disconnect':
+      pushEvent('AGENT','t-agent',`<b>${d.agentId||'Agent'}</b> disconnected — total clients: <b>${d.totalClients}</b>`);
+      document.getElementById('bb-clients').textContent=d.totalClients;
+      if(d.agentId) setAgentActive(d.agentId,false);
+      break;
+    case 'gecko.agent.status':
+      applyAgentStats(d.agentId,d.stats);
       break;
     case 'gecko.error':
       pushEvent('ERR','t-err',`<b>API ERROR:</b> ${d.message}`);
@@ -287,7 +294,9 @@ function handleEvent(ev){
       if(d.snapshot){Object.values(d.snapshot).forEach(c=>{market[c.id]=c;});}
       if(d.stats){pullCount=d.stats.pullCount||0;document.getElementById('bb-pull').textContent=pullCount;}
       renderAssetList();renderRWA();renderCenter();
-      activateAgents();
+      // Activate only agents that are REALLY connected right now
+      (d.connectedAgents||[]).forEach(id=>setAgentActive(id,true));
+      if(d.agentStats){Object.entries(d.agentStats).forEach(([id,st])=>applyAgentStats(id,st));}
       break;
     default:
       if(ev.type==='ERROR') pushEvent('ERR','t-err',d.message||JSON.stringify(d));
@@ -422,15 +431,26 @@ function buildAgentNetwork(){
   });
 }
 
-function activateAgents(){
-  CHILD_AGENTS.forEach((ag,i)=>{
-    setTimeout(()=>{
-      const dot=document.getElementById('dot-'+ag.id),stat=document.getElementById('acs-'+ag.id);
-      if(dot){dot.style.background=ag.color;dot.style.animation='pulse 2s infinite';}
-      if(stat){stat.textContent='ACTIVE';stat.style.color=ag.color;}
-      pushEvent('AGENT','t-agent',`<b>${ag.id}</b> subscribed to gecko event bus`);
-    },600*i+300);
+function setAgentActive(id, active){
+  const ag=CHILD_AGENTS.find(a=>a.id===id);
+  if(!ag) return; // not a known child agent (e.g. DASHBOARD clients)
+  const dot=document.getElementById('dot-'+id),stat=document.getElementById('acs-'+id);
+  if(active){
+    if(dot){dot.style.background=ag.color;dot.style.animation='pulse 2s infinite';}
+    if(stat){stat.textContent='ACTIVE';stat.style.color=ag.color;}
+  }else{
+    if(dot){dot.style.background='var(--muted)';dot.style.animation='none';}
+    if(stat){stat.textContent='STANDBY';stat.style.color='var(--muted)';}
+  }
+}
+
+function applyAgentStats(id, stats){
+  if(!stats) return;
+  Object.entries(stats).forEach(([k,v])=>{
+    if(k==='lastSeen'){updateMetric(id,'last',new Date(v).toLocaleTimeString('en-US',{hour12:false}));return;}
+    updateMetric(id,k,typeof v==='number'?v.toLocaleString():v);
   });
+  setAgentActive(id,true);
 }
 
 function updateMetric(agId,key,val){const el=document.getElementById(`m-${agId}-${key}`);if(el)el.textContent=val;}

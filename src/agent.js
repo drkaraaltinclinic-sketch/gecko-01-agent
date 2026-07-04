@@ -46,7 +46,12 @@ const state = {
   startTime: Date.now(),
   errors: [],
   connectedAgents: new Map(),
+  agentStats: {},   // live stats per agent id, e.g. { 'ALPHA-01': { signals: 12, ... } }
 };
+
+function connectedAgentIds() {
+  return [...state.connectedAgents.values()].map(a => a.id);
+}
 
 // ─── Alert Thresholds ────────────────────────────────────────────────────────
 const THRESHOLDS = {
@@ -239,6 +244,8 @@ wss.on('connection', (ws, req) => {
         'gecko.handshake',
       ],
       snapshot: state.market,
+      connectedAgents: connectedAgentIds(),
+      agentStats: state.agentStats,
       stats: {
         uptime:     Date.now() - state.startTime,
         pullCount:  state.pullCount,
@@ -259,6 +266,12 @@ wss.on('connection', (ws, req) => {
       }
       if (msg.type === 'SUBSCRIBE') {
         ws.send(JSON.stringify({ type: 'SYS', topic: 'gecko.subscribe.ack', data: { topics: msg.topics }, agentId: 'GECKO-01', timestamp: new Date().toISOString() }));
+      }
+      if (msg.type === 'STATUS') {
+        // Child agent reporting live stats — store and rebroadcast to all clients (dashboards)
+        const id = msg.agentId || agentId;
+        state.agentStats[id] = { ...msg.stats, lastSeen: new Date().toISOString() };
+        emit('SYS', 'gecko.agent.status', { agentId: id, stats: state.agentStats[id] });
       }
     } catch (e) {
       console.warn('[WS] Bad message from', agentId, e.message);
