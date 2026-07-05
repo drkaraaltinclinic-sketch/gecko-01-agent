@@ -18,6 +18,8 @@ const CG_TIER = (process.env.CG_TIER || 'demo').toLowerCase();
 const CG_BASE = CG_TIER === 'pro' ? 'https://pro-api.coingecko.com/api/v3' : 'https://api.coingecko.com/api/v3';
 const CG_KEY_PARAM = CG_TIER === 'pro' ? 'x_cg_pro_api_key' : 'x_cg_demo_api_key';
 const POLL_INTERVAL_MS = parseInt(process.env.POLL_INTERVAL_MS || '30000');
+const ASSET_MODE = (process.env.ASSET_MODE || 'list').toLowerCase();   // 'list' = fixed ASSETS below · 'top' = top N by market cap
+const TOP_ASSETS = Math.min(250, parseInt(process.env.TOP_ASSETS || '100'));
 
 const ASSETS = [
   { id: 'bitcoin',       sym: 'BTC',  name: 'Bitcoin',    category: 'L1' },
@@ -97,27 +99,31 @@ function emit(type, topic, data, severity = 'INFO') {
 }
 
 // ─── CoinGecko Fetch ─────────────────────────────────────────────────────────
-async function fetchMarketData() {
-  const allIds = [...ASSETS, ...RWA_ASSETS].map(a => a.id).join(',');
-  const url = `${CG_BASE}/coins/markets` +
-    `?vs_currency=usd` +
-    `&ids=${allIds}` +
-    `&order=market_cap_desc` +
-    `&per_page=50` +
-    `&page=1` +
-    `&sparkline=true` +
-    `&price_change_percentage=1h,24h,7d` +
-    `&${CG_KEY_PARAM}=${CG_API_KEY}`;
-
-  emit('SYS', 'gecko.api.request', { endpoint: '/coins/markets', assets: allIds.split(',').length });
-
+async function cgFetch(query, label) {
+  const url = `${CG_BASE}/coins/markets?vs_currency=usd&order=market_cap_desc` +
+    `&sparkline=true&price_change_percentage=1h,24h,7d&${query}&${CG_KEY_PARAM}=${CG_API_KEY}`;
   const res = await fetch(url, {
     headers: { 'Accept': 'application/json', 'User-Agent': 'GECKO-01-Agent/1.0' },
-    timeout: 15000,
+    timeout: 20000,
   });
-
-  if (!res.ok) throw new Error(`CoinGecko API ${res.status}: ${res.statusText}`);
+  if (!res.ok) throw new Error(`CoinGecko API ${res.status} (${label})`);
   return res.json();
+}
+
+async function fetchMarketData() {
+  const rwaIds = RWA_ASSETS.map(a => a.id).join(',');
+  if (ASSET_MODE === 'top') {
+    emit('SYS', 'gecko.api.request', { endpoint: '/coins/markets', mode: `top ${TOP_ASSETS} by mcap + RWA` });
+    const [top, rwa] = await Promise.all([
+      cgFetch(`per_page=${TOP_ASSETS}&page=1`, 'top'),
+      cgFetch(`ids=${rwaIds}&per_page=10&page=1`, 'rwa'),
+    ]);
+    const seen = new Set(top.map(c => c.id));
+    return [...top, ...rwa.filter(c => !seen.has(c.id))];
+  }
+  const allIds = [...ASSETS, ...RWA_ASSETS].map(a => a.id).join(',');
+  emit('SYS', 'gecko.api.request', { endpoint: '/coins/markets', assets: allIds.split(',').length });
+  return cgFetch(`ids=${allIds}&per_page=150&page=1`, 'list');
 }
 
 // ─── Market Tick Processing ───────────────────────────────────────────────────
