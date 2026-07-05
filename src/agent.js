@@ -14,7 +14,9 @@ const path = require('path');
 // ─── Config ──────────────────────────────────────────────────────────────────
 const PORT = process.env.PORT || 3000;
 const CG_API_KEY = process.env.CG_API_KEY || 'CG-sPRZEVjq2JVYm9TNZVsH3tqj';
-const CG_BASE = 'https://api.coingecko.com/api/v3';
+const CG_TIER = (process.env.CG_TIER || 'demo').toLowerCase();
+const CG_BASE = CG_TIER === 'pro' ? 'https://pro-api.coingecko.com/api/v3' : 'https://api.coingecko.com/api/v3';
+const CG_KEY_PARAM = CG_TIER === 'pro' ? 'x_cg_pro_api_key' : 'x_cg_demo_api_key';
 const POLL_INTERVAL_MS = parseInt(process.env.POLL_INTERVAL_MS || '30000');
 
 const ASSETS = [
@@ -105,7 +107,7 @@ async function fetchMarketData() {
     `&page=1` +
     `&sparkline=true` +
     `&price_change_percentage=1h,24h,7d` +
-    `&x_cg_demo_api_key=${CG_API_KEY}`;
+    `&${CG_KEY_PARAM}=${CG_API_KEY}`;
 
   emit('SYS', 'gecko.api.request', { endpoint: '/coins/markets', assets: allIds.split(',').length });
 
