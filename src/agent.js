@@ -46,6 +46,7 @@ const state = {
   lastPull: null,
   pullCount: 0,
   alertCount: 0,
+  alertCooldowns: {},   // 'TYPE:ASSET' → expiry ts (audit finding: duplicate alerts every cycle)
   eventCount: 0,
   startTime: Date.now(),
   errors: [],
@@ -185,11 +186,18 @@ function checkAlerts(tick) {
     alerts.push({ type: 'VOL_SPIKE', severity: 'MED', value: volRatio, asset: tick.symbol });
   }
 
-  if (tick.ath && tick.price >= tick.ath * THRESHOLDS.ATH_NEAR) {
+  // Audit finding: stablecoins are permanently 'near ATH' — pure noise. Excluded.
+  const looksStable = /USD|DAI|EUR[STC]?$|FDUSD|PYUSD|TUSD|USDE|USDS/.test(tick.symbol) || (tick.price > 0.95 && tick.price < 1.05 && tick.ath && tick.ath < 1.25);
+  if (tick.ath && tick.price >= tick.ath * THRESHOLDS.ATH_NEAR && !looksStable) {
     alerts.push({ type: 'ATH_NEAR', severity: 'HIGH', value: tick.price, asset: tick.symbol, ath: tick.ath });
   }
 
   alerts.forEach(alert => {
+    // Audit finding: identical alerts every cycle = alert fatigue. Cooldown per type:asset.
+    const key = `${alert.type}:${alert.asset}`;
+    const now = Date.now();
+    if (state.alertCooldowns[key] && state.alertCooldowns[key] > now) return;
+    state.alertCooldowns[key] = now + (alert.type === 'ATH_NEAR' ? 6 * 3600000 : 30 * 60000);
     state.alertCount++;
     emit('ALERT', 'gecko.alert.fire', { ...alert, price: tick.price, timestamp: new Date().toISOString() }, alert.severity);
   });
