@@ -46,7 +46,6 @@ const state = {
   lastPull: null,
   pullCount: 0,
   alertCount: 0,
-  alertCooldowns: {},   // 'TYPE:ASSET' → expiry ts (audit finding: duplicate alerts every cycle)
   eventCount: 0,
   startTime: Date.now(),
   errors: [],
@@ -186,18 +185,11 @@ function checkAlerts(tick) {
     alerts.push({ type: 'VOL_SPIKE', severity: 'MED', value: volRatio, asset: tick.symbol });
   }
 
-  // Audit finding: stablecoins are permanently 'near ATH' — pure noise. Excluded.
-  const looksStable = /USD|DAI|EUR[STC]?$|FDUSD|PYUSD|TUSD|USDE|USDS/.test(tick.symbol) || (tick.price > 0.95 && tick.price < 1.05 && tick.ath && tick.ath < 1.25);
-  if (tick.ath && tick.price >= tick.ath * THRESHOLDS.ATH_NEAR && !looksStable) {
+  if (tick.ath && tick.price >= tick.ath * THRESHOLDS.ATH_NEAR) {
     alerts.push({ type: 'ATH_NEAR', severity: 'HIGH', value: tick.price, asset: tick.symbol, ath: tick.ath });
   }
 
   alerts.forEach(alert => {
-    // Audit finding: identical alerts every cycle = alert fatigue. Cooldown per type:asset.
-    const key = `${alert.type}:${alert.asset}`;
-    const now = Date.now();
-    if (state.alertCooldowns[key] && state.alertCooldowns[key] > now) return;
-    state.alertCooldowns[key] = now + (alert.type === 'ATH_NEAR' ? 6 * 3600000 : 30 * 60000);
     state.alertCount++;
     emit('ALERT', 'gecko.alert.fire', { ...alert, price: tick.price, timestamp: new Date().toISOString() }, alert.severity);
   });
@@ -288,6 +280,12 @@ wss.on('connection', (ws, req) => {
         const id = msg.agentId || agentId;
         state.agentStats[id] = { ...msg.stats, lastSeen: new Date().toISOString() };
         emit('SYS', 'gecko.agent.status', { agentId: id, stats: state.agentStats[id] });
+      }
+      // RELAY inter-agent bus messages (vizier.memo, actuary.report, ...): without
+      // this, agents can publish to the hub but no other agent ever hears them —
+      // KAIZEN's vizier.memo / actuary.report ingest expects exactly these relays.
+      if (msg.topic && msg.type !== 'PING' && msg.type !== 'PONG' && msg.type !== 'STATUS' && msg.type !== 'SUBSCRIBE') {
+        emit(msg.type || 'SYS', msg.topic, { ...(msg.data || {}), sourceAgent: msg.agentId || agentId });
       }
     } catch (e) {
       console.warn('[WS] Bad message from', agentId, e.message);
