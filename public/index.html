@@ -212,25 +212,6 @@ const CHILD_AGENTS = [
   {id:'RISK-01', name:'Risk Monitor Agent', desc:'Portfolio risk & drawdown alerts',color:'#e05050',status:'standby',metrics:{alerts:0,score:'—'}},
   {id:'RWA-01',  name:'RWA Oracle Agent',   desc:'Tokenized asset NAV tracking',   color:'#1dc9a0',status:'standby',metrics:{tracked:3,nav:'—'}},
   {id:'REPORT-01',name:'Report Agent',      desc:'Daily digest & summaries',        color:'#e8a020',status:'standby',metrics:{reports:0,last:'—'}},
-  {id:'KAISEN-01',name:'Ichimoku Screener', desc:'Hyperliquid TA · TK cross, Kumo, Trinity',color:'#818cf8',status:'standby',metrics:{signals:0,scans:0,mode:'passive'}},
-  {id:'HOLDER-01',name:'Concentration Monitor',desc:'Insider risk · top-10 supply, whale deltas',color:'#f97316',status:'standby',metrics:{tokens:0,alerts:0,mode:'passive'}},
-  {id:'DEFILAMA-01',name:'Liquidity Flow',desc:'TVL flows · stablecoin tide · DEX volume',color:'#84cc16',status:'standby',metrics:{tvl:'—',alerts:0,mode:'passive'}},
-  {id:'TOKENOMIST-01',name:'Unlock Calendar',desc:'Supply unlocks · dilution · scheduled sell pressure',color:'#ec4899',status:'standby',metrics:{tracked:0,alerts:0,mode:'passive'}},
-  {id:'MACRO-01',name:'Risk Regime',desc:'TradFi weather · VIX, DXY, yields, gold, oil',color:'#38bdf8',status:'standby',metrics:{regime:'—',vix:0,mode:'passive'}},
-  {id:'BACKTEST-01',name:'Proving Ground',desc:'Setup evidence · win rates, expectancy, PF',color:'#eab308',status:'standby',metrics:{tests:0,best:'—',mode:'passive'}},
-  {id:'SHERLOCK-01',name:'The Detective',desc:'News reasoning · economic calendar · market mood',color:'#94a3b8',status:'standby',metrics:{mood:'—',events:0,mode:'passive'}},
-  {id:'CROWD-01',name:'Squeeze Radar',desc:'Funding · open interest · crowd positioning',color:'#22d3ee',status:'standby',metrics:{bias:'—',oi:'—',mode:'passive'}},
-  {id:'LIQUIDATION-01',name:'Cascade Map',desc:'Estimated liq clusters · magnets · cascade fuel',color:'#f43f5e',status:'standby',metrics:{magnets:0,hot:'—',mode:'passive'}},
-  {id:'DEPTH-01',name:'Order-Book Eye',desc:'Walls · imbalance · slippage forecasting',color:'#34d399',status:'standby',metrics:{walls:0,thin:0,mode:'passive'}},
-  {id:'WHALE-01',name:'Flow Tracker',desc:'Exchange flows · whale moves · dry powder',color:'#c084fc',status:'standby',metrics:{flows:0,net:'—',mode:'passive'}},
-  {id:'AUDITOR-01',name:'The Conscience',desc:'Liveness watch · Claude audits · coherence',color:'#e2e8f0',status:'standby',metrics:{findings:0,health:'—',mode:'passive'}},
-  {id:'ENGINE-01',name:'Analysis Lab',desc:'RSI · MACD · BB · volume · structure · cycles',color:'#60a5fa',status:'standby',metrics:{verdict:'—',scans:0,mode:'passive'}},
-  {id:'MATRIX-01',name:'The Playmaker',desc:'Correlation · beta · relative strength · clusters',color:'#e879f9',status:'standby',metrics:{corr:'—',regime:'—',mode:'passive'}},
-  {id:'VIZIER-01',name:'Grand Vizier',desc:'IC memos · asymmetric review · daily briefings',color:'#d4a017',status:'standby',metrics:{memos:0,verdicts:'—',mode:'passive'}},
-  {id:'SENTINEL-01',name:'The Watchtower',desc:'Carry yield · vol structure · venue health · retail pulse',color:'#5eead4',status:'standby',metrics:{pulse:'—',vol:'—',venue:'—'}},
-  {id:'KAIZEN-01',name:'改善 Kaizen',desc:'Observe · propose · deliver · measure — continuous improvement',color:'#f9a8d4',status:'standby',metrics:{tasks:0,open:0,mode:'passive'}},
-  {id:'STRATEGOS-01',name:'The War Room',desc:'Strategy blueprints · carry · pairs · squeezes · flywheels',color:'#c026d3',status:'standby',metrics:{blueprints:0,open:0,mode:'passive'}},
-  {id:'SUPREME-LEADER',name:'👑 The Throne',desc:'Autonomous decision engine · paper trading · graduation',color:'#f5c518',status:'standby',metrics:{equity:'—',positions:0,trades:0}},
 ];
 
 let market={}, selId='bitcoin', chart=null, range='1H';
@@ -452,19 +433,33 @@ function buildAgentNetwork(){
 
 function setAgentActive(id, active){
   const ag=CHILD_AGENTS.find(a=>a.id===id);
-  if(!ag) return; // not a known child agent (e.g. DASHBOARD clients)
   const dot=document.getElementById('dot-'+id),stat=document.getElementById('acs-'+id);
+  if(!dot&&!stat) return; // no card exists (e.g. DASHBOARD clients)
+  const color=ag?ag.color:'#2dd4bf'; // roster agents keep their color; dynamic agents get teal
   if(active){
-    if(dot){dot.style.background=ag.color;dot.style.animation='pulse 2s infinite';}
-    if(stat){stat.textContent='ACTIVE';stat.style.color=ag.color;}
+    if(dot){dot.style.background=color;dot.style.animation='pulse 2s infinite';}
+    if(stat){stat.textContent='ACTIVE';stat.style.color=color;}
   }else{
     if(dot){dot.style.background='var(--muted)';dot.style.animation='none';}
     if(stat){stat.textContent='STANDBY';stat.style.color='var(--muted)';}
   }
 }
 
+// Creates a card for any live agent heard on the bus that isn't in the hardcoded
+// roster (SUPREME-LEADER, KAIZEN-01, ACTUARY-01, ...). Their metric rows are added
+// on the fly from whatever fields their real STATUS heartbeats carry.
+function ensureAgentCard(id){
+  if(document.getElementById('ac-'+id))return;
+  const el=document.getElementById('agent-net');
+  const c=document.createElement('div');c.className='agent-card';c.id='ac-'+id;
+  c.innerHTML=`<div class="ac-hdr"><div class="ac-dot" id="dot-${id}" style="background:var(--muted)"></div><div class="ac-name">${id}</div><div class="ac-status" id="acs-${id}" style="color:var(--muted)">STANDBY</div></div><div class="ac-body"><div style="color:var(--soft);margin-bottom:4px;line-height:1.4">Live network agent — heartbeat verified</div></div>`;
+  el.appendChild(c);
+  pushEvent('AGENT','t-agent',`<b>${id}</b> joined the network — card added`);
+}
+
 function applyAgentStats(id, stats){
-  if(!stats) return;
+  if(!stats||!id||id.indexOf('DASHBOARD')===0) return;
+  ensureAgentCard(id);
   Object.entries(stats).forEach(([k,v])=>{
     if(k==='lastSeen'){updateMetric(id,'last',new Date(v).toLocaleTimeString('en-US',{hour12:false}));return;}
     updateMetric(id,k,typeof v==='number'?v.toLocaleString():v);
@@ -472,7 +467,19 @@ function applyAgentStats(id, stats){
   setAgentActive(id,true);
 }
 
-function updateMetric(agId,key,val){const el=document.getElementById(`m-${agId}-${key}`);if(el)el.textContent=val;}
+function updateMetric(agId,key,val){
+  let el=document.getElementById(`m-${agId}-${key}`);
+  if(!el){
+    // Dynamic agents: create the metric row the first time this stat appears
+    const body=document.querySelector('#ac-'+agId+' .ac-body');
+    if(!body)return;
+    const div=document.createElement('div');div.className='ac-metric';
+    div.innerHTML=`<span class="acm-lbl">${key}</span><span class="acm-val" id="m-${agId}-${key}"></span>`;
+    body.appendChild(div);
+    el=document.getElementById(`m-${agId}-${key}`);
+  }
+  el.textContent=val;
+}
 
 setInterval(()=>{
   uptimeSec++;
