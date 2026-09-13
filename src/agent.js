@@ -46,6 +46,7 @@ const state = {
   lastPull: null,
   pullCount: 0,
   alertCount: 0,
+  suppressedCount: 0,
   eventCount: 0,
   startTime: Date.now(),
   errors: [],
@@ -68,6 +69,17 @@ const THRESHOLDS = {
   VOL_SPIKE:   0.15,
   ATH_NEAR:    0.98,
 };
+
+// ─── Alert Cooldown (Sultan's Review 2026-09-10, Dr K-approved) ──────────────
+// Level conditions (24h change, vol/mcap, near-ATH) stay true across many
+// 30s polls, so firing on every evaluation produced ~300K alerts/day
+// (103 assets × 2880 polls). Edge-trigger instead: fire on first crossing or
+// severity escalation, then at most once per ALERT_COOLDOWN_MS while the
+// condition persists; re-arm the moment it clears. ALERT_COOLDOWN_MS=0
+// restores the legacy fire-every-poll behavior (rollback switch).
+const ALERT_COOLDOWN_MS = Number(process.env.ALERT_COOLDOWN_MS ?? 3600000);
+const SEV_RANK = { LOW: 1, MED: 2, HIGH: 3 };
+const alertStates = new Map(); // `${asset}:${type}` → { severity, firedAt }
 
 // ─── App Setup ───────────────────────────────────────────────────────────────
 const app = express();
@@ -189,12 +201,38 @@ function checkAlerts(tick) {
     alerts.push({ type: 'ATH_NEAR', severity: 'HIGH', value: tick.price, asset: tick.symbol, ath: tick.ath });
   }
 
-  alerts.forEach(alert => {
+  // Edge-trigger + cooldown: decide which of this poll's active conditions
+  // actually fire. First crossing and severity escalations fire immediately;
+  // a persisting condition re-fires at most once per cooldown; everything
+  // else counts as suppressed. Conditions no longer active re-arm below.
+  const activeKeys = new Set();
+  const fired = [];
+  const now = Date.now();
+  for (const alert of alerts) {
+    const key = `${alert.asset}:${alert.type}`;
+    activeKeys.add(key);
+    if (ALERT_COOLDOWN_MS === 0) { fired.push(alert); continue; } // legacy
+    const prev = alertStates.get(key);
+    const escalated = prev && (SEV_RANK[alert.severity] || 0) > (SEV_RANK[prev.severity] || 0);
+    if (!prev || escalated || now - prev.firedAt >= ALERT_COOLDOWN_MS) {
+      alertStates.set(key, { severity: alert.severity, firedAt: now });
+      fired.push(alert);
+    } else {
+      state.suppressedCount++;
+    }
+  }
+  for (const key of alertStates.keys()) {
+    if (key.startsWith(`${tick.symbol}:`) && !activeKeys.has(key)) {
+      alertStates.delete(key); // condition cleared → re-arm for the next episode
+    }
+  }
+
+  fired.forEach(alert => {
     state.alertCount++;
     emit('ALERT', 'gecko.alert.fire', { ...alert, price: tick.price, timestamp: new Date().toISOString() }, alert.severity);
   });
 
-  return alerts;
+  return fired;
 }
 
 // ─── Main Pull Cycle ─────────────────────────────────────────────────────────
@@ -310,6 +348,8 @@ app.get('/health', (_, res) => {
     uptime:     Date.now() - state.startTime,
     pullCount:  state.pullCount,
     alertCount: state.alertCount,
+    suppressedCount: state.suppressedCount,
+    alertCooldownMs: ALERT_COOLDOWN_MS,
     lastPull:   state.lastPull,
     clients:    wss.clients.size,
     errors:     state.errors.slice(-3),
